@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NSGA-II Lab</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/12.2.1/math.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}html,body,#root{height:100%}
+body{background:#080c14;color:#c8dce8;font-family:'DM Sans',sans-serif}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:#080c14}::-webkit-scrollbar-thumb{background:#1e2d3d;border-radius:3px}
+input[type=range]{-webkit-appearance:none;height:3px;background:#1a2a3a;border-radius:2px;outline:none;width:100%}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;background:#7ecbf5;border-radius:50%;cursor:pointer;border:2px solid #0a0f18}
+select{-webkit-appearance:none}input:focus,select:focus{border-color:#7ecbf5!important;outline:none}
+.tip{font-size:8.5px;color:#2e4a60;line-height:1.4;margin-top:2px;font-style:italic}
+.sec{margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #0e1620}.sec:last-child{border-bottom:none}
+.stit{font-size:8.5px;color:#4a6a8a;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:5px;font-weight:700}
+.pr{display:flex;align-items:center;gap:6px;margin-bottom:3px}
+.pl{font-size:9.5px;color:#5a7a9a;width:85px;flex-shrink:0;font-family:'JetBrains Mono',monospace}
+.pv{font-size:9.5px;color:#7ecbf5;width:34px;text-align:right;font-family:'JetBrains Mono',monospace;flex-shrink:0}
+.btn{border-radius:7px;padding:7px 14px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans';transition:all .15s;border:1.5px solid;white-space:nowrap}
+.btn:hover:not(:disabled){filter:brightness(1.2)}.btn:disabled{opacity:.25;cursor:default}
+.card{background:#0a1018;border:1px solid #141e2c;border-radius:10px;padding:12px 14px;margin-bottom:8px}
+.topbar{position:sticky;top:0;z-index:100;background:linear-gradient(180deg,#0c1220,#0b1018);border-bottom:1px solid #141e2c;padding:0 16px}
+.theory-box{background:#0c1420;border:1px solid #1a2a3a;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:10px;line-height:1.6}
+.formula{background:rgba(0,0,0,.3);border-radius:5px;padding:5px 8px;font-family:'JetBrains Mono';font-size:9.5px;margin:4px 0;color:#7ecbf5;border:1px solid #7ecbf510}
+.highlight-text{font-weight:600}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const{useState,useCallback,useRef,useEffect,useMemo}=React;
+
+/* ===== SAFE EVAL ===== */
+function safeEval(expr,vars){
+  if(!expr||!expr.trim())return NaN;
+  try{
+    const scope={};
+    vars.forEach((v,i)=>{scope['x'+(i+1)]=v});
+    scope.pi=Math.PI;scope.e=Math.E;
+    const r=math.evaluate(expr.trim(),scope);
+    if(typeof r!=='number'||!isFinite(r))return NaN;
+    return r;
+  }catch{return NaN}
+}
+
+/* ===== ENGINE ===== */
+class Ind{constructor(x){this.x=[...x];this.obj=[];this.con=[];this.rank=0;this.cd=0;this.cv=0;this.feasible=true;this.isOffspring=false;this.isParent=false;this.justMutated=false}}
+
+/* === BUILT-IN BENCHMARK FUNCTIONS === */
+const BUILTIN={
+  zdt1:x=>{const n=x.length;const f1=x[0];const g=1+9*x.slice(1).reduce((s,v)=>s+v,0)/(n-1);return{obj:[f1,g*(1-Math.sqrt(f1/g))],con:[]}},
+  zdt2:x=>{const n=x.length;const f1=x[0];const g=1+9*x.slice(1).reduce((s,v)=>s+v,0)/(n-1);return{obj:[f1,g*(1-Math.pow(f1/g,2))],con:[]}},
+  zdt3:x=>{const n=x.length;const f1=x[0];const g=1+9*x.slice(1).reduce((s,v)=>s+v,0)/(n-1);return{obj:[f1,g*(1-Math.sqrt(f1/g)-f1/g*Math.sin(10*Math.PI*f1))],con:[]}},
+  zdt4:x=>{const n=x.length;const f1=x[0];const g=1+10*(n-1)+x.slice(1).reduce((s,v)=>s+v*v-10*Math.cos(4*Math.PI*v),0);return{obj:[f1,g*(1-Math.sqrt(f1/g))],con:[]}},
+  fonseca:x=>{const n=x.length;const s1=x.reduce((s,v)=>s+Math.pow(v-1/Math.sqrt(n),2),0);const s2=x.reduce((s,v)=>s+Math.pow(v+1/Math.sqrt(n),2),0);return{obj:[1-Math.exp(-s1),1-Math.exp(-s2)],con:[]}},
+  tnk:x=>{const[a,b]=x;const c1=-(a*a+b*b-1-0.1*Math.cos(16*Math.atan2(a,b+1e-30)));const c2=(a-0.5)*(a-0.5)+(b-0.5)*(b-0.5)-0.5;return{obj:[a,b],con:[c1,c2]}},
+  chankong:x=>{const[a,b]=x;return{obj:[2+(a-2)*(a-2)+(b-1)*(b-1),9*a-(b-1)*(b-1)],con:[a*a+b*b-225,(a-3)*(a-3)+(b+1)*(b+1)-100, /* extra: */ a+b-10]}}, // simplified constraints as g<=0: x1^2+x2^2<=225 → x1^2+x2^2-225, etc
+  osyczka:x=>{const[a,b,c,d,e,f]=x;return{obj:[-(25*(a-2)*(a-2)+(b-2)*(b-2)+(c-1)*(c-1)+(d-4)*(d-4)+(e-1)*(e-1)),a*a+b*b+c*c+d*d+e*e+f*f],con:[-(a+b-2),-(6-a-b),-(2-b+a),-(2-a+3*b),-(4-(c-3)*(c-3)-d),-(e+f-6-0)]}},// 6 constraints
+};
+
+function evalPop(p,oE,cE,builtinKey){
+  p.forEach(d=>{
+    if(builtinKey&&BUILTIN[builtinKey]){
+      const r=BUILTIN[builtinKey](d.x);
+      d.obj=r.obj;d.con=r.con;
+    }else{
+      d.obj=oE.map(e=>safeEval(e,d.x));
+      d.con=cE.map(e=>safeEval(e,d.x));
+    }
+    d.cv=d.con.reduce((s,c)=>{const v=isNaN(c)?0:Math.max(0,c);return s+v},0);
+    d.feasible=d.cv<=1e-10&&d.obj.every(o=>!isNaN(o)&&isFinite(o));
+  });
+}
+function validObj(ind){return ind.obj.length>=2&&ind.obj.every(o=>isFinite(o))}
+function cdom(a,b){if(a.feasible&&!b.feasible)return true;if(!a.feasible&&b.feasible)return false;if(!a.feasible&&!b.feasible)return a.cv<b.cv;if(!validObj(a)||!validObj(b))return false;let d=false;for(let i=0;i<a.obj.length;i++){if(a.obj[i]>b.obj[i])return false;if(a.obj[i]<b.obj[i])d=true}return d}
+function nds(p){const n=p.length;if(n===0)return[];const dc=new Array(n).fill(0),ds=Array.from({length:n},()=>[]),f=[[]];for(let i=0;i<n;i++){for(let j=0;j<n;j++){if(i===j)continue;if(cdom(p[i],p[j]))ds[i].push(j);else if(cdom(p[j],p[i]))dc[i]++}if(dc[i]===0){p[i].rank=0;f[0].push(i)}}let k=0;while(f[k]&&f[k].length>0){const nx=[];for(const i of f[k])for(const j of ds[i]){dc[j]--;if(dc[j]===0){p[j].rank=k+1;nx.push(j)}}if(!nx.length)break;f.push(nx);k++}return f}
+function cdist(p,f){if(!f||f.length<=2){if(f)f.forEach(i=>{p[i].cd=Infinity});return}f.forEach(i=>{p[i].cd=0});const nO=p[f[0]].obj.length;for(let m=0;m<nO;m++){const valid=f.filter(i=>isFinite(p[i].obj[m]));if(valid.length<=2){valid.forEach(i=>{p[i].cd=Infinity});continue}const s=valid.sort((a,b)=>p[a].obj[m]-p[b].obj[m]);p[s[0]].cd=Infinity;p[s[s.length-1]].cd=Infinity;const mn=p[s[0]].obj[m],mx=p[s[s.length-1]].obj[m];if(mx-mn<1e-12)continue;for(let i=1;i<s.length-1;i++)p[s[i]].cd+=(p[s[i+1]].obj[m]-p[s[i-1]].obj[m])/(mx-mn)}}
+function tsel(p,n){const s=[];const pairs=[];for(let k=0;k<n;k++){const i=~~(Math.random()*p.length),j=~~(Math.random()*p.length);const win=p[i].rank<p[j].rank?i:(p[i].rank>p[j].rank?j:(p[i].cd>=p[j].cd?i:j));s.push(p[win]);pairs.push({a:i,b:j,winner:win})}return{selected:s,pairs}}
+function sbx(a,b,bd,vt,eC=20,pC=.9){const c1=new Ind([...a.x]),c2=new Ind([...b.x]);c1.isOffspring=true;c2.isOffspring=true;if(Math.random()>pC)return[c1,c2];for(let i=0;i<a.x.length;i++){if(Math.random()>.5||Math.abs(a.x[i]-b.x[i])<1e-14)continue;const[lo,hi]=a.x[i]<b.x[i]?[a.x[i],b.x[i]]:[b.x[i],a.x[i]];const u=Math.random(),xl=bd[i][0],xu=bd[i][1];const b1=1+2*(lo-xl)/(hi-lo+1e-30),a1=2-Math.pow(b1,-(eC+1));const q1=u<=1/a1?Math.pow(u*a1,1/(eC+1)):Math.pow(1/(2-u*a1),1/(eC+1));const b2=1+2*(xu-hi)/(hi-lo+1e-30),a2=2-Math.pow(b2,-(eC+1));const q2=u<=1/a2?Math.pow(u*a2,1/(eC+1)):Math.pow(1/(2-u*a2),1/(eC+1));c1.x[i]=Math.max(xl,Math.min(xu,.5*((lo+hi)-q1*(hi-lo))));c2.x[i]=Math.max(xl,Math.min(xu,.5*((lo+hi)+q2*(hi-lo))));if(vt[i]==='discrete'){c1.x[i]=Math.round(c1.x[i]);c2.x[i]=Math.round(c2.x[i])}}return[c1,c2]}
+function pmut(d,bd,vt,eM=20){const pM=1/d.x.length;let mutated=false;for(let i=0;i<d.x.length;i++){if(Math.random()>pM)continue;mutated=true;const delta=bd[i][1]-bd[i][0],u=Math.random();const dq=u<.5?Math.pow(2*u,1/(eM+1))-1:1-Math.pow(2*(1-u),1/(eM+1));d.x[i]=Math.max(bd[i][0],Math.min(bd[i][1],d.x[i]+dq*delta));if(vt[i]==='discrete')d.x[i]=Math.round(d.x[i])}d.justMutated=mutated;return d}
+function doReplace(pop,off,nPop){const c=[...pop,...off];const cF=nds(c);const np=[];let fi=0;while(fi<cF.length&&np.length+cF[fi].length<=nPop){cdist(c,cF[fi]);cF[fi].forEach(idx=>np.push(c[idx]));fi++}if(np.length<nPop&&fi<cF.length){cdist(c,cF[fi]);[...cF[fi]].sort((a,b)=>c[b].cd-c[a].cd).slice(0,nPop-np.length).forEach(idx=>np.push(c[idx]))}np.forEach(d=>{d.isOffspring=false;d.isParent=false;d.justMutated=false});const ff=nds(np);ff.forEach(f=>cdist(np,f));return np}
+
+const PRESETS={
+  // === SIMPLE (good for learning) ===
+  schaffer:{name:"① Schaffer (1 var, simple)",cat:'simple',nVar:1,bounds:[[-5,10]],types:['cont'],objs:["x1^2","(x1-2)^2"],constrs:[],builtin:null,desc:'1 seule variable. Idéal pour comprendre le front de Pareto.'},
+  binh:{name:"② Binh-Korn (2 var, contraintes)",cat:'simple',nVar:2,bounds:[[0,5],[0,3]],types:['cont','cont'],objs:["4*x1^2+4*x2^2","(x1-5)^2+(x2-5)^2"],constrs:["(x1-5)^2+x2^2-25","-(x1-8)^2-(x2+3)^2+7.7"],builtin:null,desc:'Classique bi-objectif, 2 contraintes non-linéaires.'},
+  constr:{name:"③ CONSTR (2 var, contraintes lin.)",cat:'simple',nVar:2,bounds:[[0.1,10],[0,5]],types:['cont','cont'],objs:["x1","(1+x2)/x1"],constrs:["6-x2-9*x1","1+x2-9*x1"],builtin:null,desc:'Front borné par 2 contraintes linéaires.'},
+  kursawe:{name:"④ Kursawe (non-convexe)",cat:'simple',nVar:2,bounds:[[-5,5],[-5,5]],types:['cont','cont'],objs:["-10*exp(-0.2*sqrt(x1^2+x2^2))","abs(x1)^0.8+5*sin(x1^3)+abs(x2)^0.8+5*sin(x2^3)"],constrs:[],builtin:null,desc:'Front non-convexe intéressant.'},
+  discrete:{name:"⑤ Mixte discret (3 var)",cat:'simple',nVar:3,bounds:[[0,10],[0,10],[1,5]],types:['cont','cont','discrete'],objs:["x1^2+x3","(x1-4)^2+(x2-4)^2+x3"],constrs:["x1+x2-8"],builtin:null,desc:'Variable discrète x3 ∈ {1..5}.'},
+  // === BENCHMARKS AVANCÉS ===
+  zdt1:{name:"ZDT1 — Convexe (30 var)",cat:'bench',nVar:30,bounds:Array.from({length:30},()=>[0,1]),types:Array(30).fill('cont'),objs:[],constrs:[],builtin:'zdt1',desc:'30 variables. Front convexe classique. Pareto: x₁∈[0,1], xᵢ=0 pour i>1.'},
+  zdt2:{name:"ZDT2 — Non-convexe (30 var)",cat:'bench',nVar:30,bounds:Array.from({length:30},()=>[0,1]),types:Array(30).fill('cont'),objs:[],constrs:[],builtin:'zdt2',desc:'30 variables. Front non-convexe (concave). Difficile pour certaines méthodes.'},
+  zdt3:{name:"ZDT3 — Discontinu (30 var)",cat:'bench',nVar:30,bounds:Array.from({length:30},()=>[0,1]),types:Array(30).fill('cont'),objs:[],constrs:[],builtin:'zdt3',desc:'30 variables. Front de Pareto discontinu (5 segments). Test de diversité.'},
+  zdt4:{name:"ZDT4 — Multimodal (10 var)",cat:'bench',nVar:10,bounds:[[0,1],...Array.from({length:9},()=>[-5,5])],types:Array(10).fill('cont'),objs:[],constrs:[],builtin:'zdt4',desc:'10 variables. 21^9 optima locaux ! Test de robustesse.'},
+  fonseca:{name:"Fonseca-Fleming (3 var)",cat:'bench',nVar:3,bounds:Array.from({length:3},()=>[-4,4]),types:Array(3).fill('cont'),objs:[],constrs:[],builtin:'fonseca',desc:'3 variables. Front non-convexe. Référence historique (1995).'},
+  tnk:{name:"TNK — Discontinu contraint (2 var)",cat:'bench',nVar:2,bounds:[[1e-6,Math.PI],[1e-6,Math.PI]],types:['cont','cont'],objs:[],constrs:[],builtin:'tnk',desc:'2 variables, 2 contraintes non-linéaires. Front discontinu.'},
+  chankong:{name:"Chankong-Haimes (2 var, 3 contr.)",cat:'bench',nVar:2,bounds:[[-20,20],[-20,20]],types:['cont','cont'],objs:[],constrs:[],builtin:'chankong',desc:'2 variables, 3 contraintes. Référence classique (1983).'},
+  osyczka:{name:"Osyczka-Kundu (6 var, 6 contr.)",cat:'bench',nVar:6,bounds:[[0,10],[0,10],[1,5],[0,6],[1,5],[0,10]],types:Array(6).fill('cont'),objs:[],constrs:[],builtin:'osyczka',desc:'6 variables, 6 contraintes. Le plus complexe des benchmarks ici.'},
+  // === PERSONNALISÉ ===
+  custom:{name:"✏️ Personnalisé",cat:'custom',nVar:2,bounds:[[0,5],[0,5]],types:['cont','cont'],objs:["x1^2+x2^2","(x1-3)^2+(x2-3)^2"],constrs:[],builtin:null,desc:'Définissez vos propres fonctions.'},
+};
+
+const STEPS=[
+  {id:'eval',label:'Évaluation',icon:'📊',color:'#f5a623'},
+  {id:'check',label:'Arrêt ?',icon:'🔍',color:'#e85d75'},
+  {id:'select',label:'Sélection',icon:'🏆',color:'#8b5cf6'},
+  {id:'cross',label:'Croisement',icon:'🧬',color:'#4ade80'},
+  {id:'mutate',label:'Mutation',icon:'⚡',color:'#f59e0b'},
+  {id:'replace',label:'Remplacement',icon:'🔄',color:'#7ecbf5'},
+];
+
+/* ===== CHART ===== */
+function Chart({data,xL,yL,title,w=400,h=270,colorBy="rank",showLine=false,highlights=[],extraPoints=[]}){
+  const ref=useRef();
+  useEffect(()=>{const c=ref.current;if(!c)return;const ctx=c.getContext('2d');const dpr=window.devicePixelRatio||1;c.width=w*dpr;c.height=h*dpr;c.style.width=w+'px';c.style.height=h+'px';ctx.scale(dpr,dpr);ctx.clearRect(0,0,w,h);
+    if(!data||!data.length){ctx.fillStyle='#1e2d3d';ctx.font='11px DM Sans';ctx.textAlign='center';ctx.fillText('En attente d\'évaluation...',w/2,h/2);return}
+    const mg={t:26,r:14,b:34,l:48},cw=w-mg.l-mg.r,ch=h-mg.t-mg.b;const xV=data.map(d=>d.x).filter(isFinite),yV=data.map(d=>d.y).filter(isFinite);if(!xV.length){ctx.fillStyle='#1e2d3d';ctx.font='11px DM Sans';ctx.textAlign='center';ctx.fillText('Données non valides',w/2,h/2);return}
+    let x0=Math.min(...xV),x1=Math.max(...xV),y0=Math.min(...yV),y1=Math.max(...yV);if(x0===x1){x0-=1;x1+=1}if(y0===y1){y0-=1;y1+=1}const xp=(x1-x0)*.08,yp=(y1-y0)*.08;x0-=xp;x1+=xp;y0-=yp;y1+=yp;
+    const sx=v=>mg.l+(v-x0)/(x1-x0)*cw,sy=v=>mg.t+ch-(v-y0)/(y1-y0)*ch;
+    ctx.strokeStyle='#121e2e';ctx.lineWidth=.5;for(let i=0;i<=5;i++){let gx=mg.l+cw*i/5;ctx.beginPath();ctx.moveTo(gx,mg.t);ctx.lineTo(gx,mg.t+ch);ctx.stroke();let gy=mg.t+ch*i/5;ctx.beginPath();ctx.moveTo(mg.l,gy);ctx.lineTo(mg.l+cw,gy);ctx.stroke()}
+    ctx.strokeStyle='#1e2d3d';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(mg.l,mg.t+ch);ctx.lineTo(mg.l+cw,mg.t+ch);ctx.stroke();ctx.beginPath();ctx.moveTo(mg.l,mg.t);ctx.lineTo(mg.l,mg.t+ch);ctx.stroke();
+    ctx.fillStyle='#3e5a70';ctx.font='8px JetBrains Mono';ctx.textAlign='center';for(let i=0;i<=5;i++)ctx.fillText((x0+(x1-x0)*i/5).toPrecision(3),mg.l+cw*i/5,mg.t+ch+12);ctx.textAlign='right';for(let i=0;i<=5;i++)ctx.fillText((y0+(y1-y0)*(5-i)/5).toPrecision(3),mg.l-4,mg.t+ch*i/5+3);
+    ctx.fillStyle='#5a8aaa';ctx.font='500 9px JetBrains Mono';ctx.textAlign='center';ctx.fillText(xL,mg.l+cw/2,h-2);ctx.save();ctx.translate(9,mg.t+ch/2);ctx.rotate(-Math.PI/2);ctx.fillText(yL,0,0);ctx.restore();ctx.fillStyle='#a0b8cc';ctx.font='600 10px DM Sans';ctx.fillText(title,w/2,13);ctx.textAlign='start';
+    const cols=['#7ecbf5','#f5a623','#e85d75','#8b5cf6','#3e5060'];
+    if(showLine){const p0=data.filter(d=>d.rank===0&&isFinite(d.x)&&isFinite(d.y)).sort((a,b)=>a.x-b.x);if(p0.length>1){ctx.strokeStyle='rgba(126,203,245,0.2)';ctx.lineWidth=2;ctx.setLineDash([4,3]);ctx.beginPath();ctx.moveTo(sx(p0[0].x),sy(p0[0].y));p0.forEach(p=>ctx.lineTo(sx(p.x),sy(p.y)));ctx.stroke();ctx.setLineDash([])}}
+    // Extra points (offspring, parents) drawn AFTER main points so they're visible on top
+    const maxR=Math.max(0,...data.map(d=>d.rank));
+    for(let r=maxR;r>=0;r--)data.filter(d=>d.rank===r&&isFinite(d.x)&&isFinite(d.y)).forEach(d=>{const px=sx(d.x),py=sy(d.y);ctx.globalAlpha=r===0?(extraPoints.length?0.4:0.9):0.12;ctx.fillStyle=colorBy==='rank'?cols[Math.min(r,4)]:(d.feasible?'#4ade80':'#ef4444');ctx.beginPath();ctx.arc(px,py,r===0?4:2,0,Math.PI*2);ctx.fill();if(r===0&&!extraPoints.length){ctx.globalAlpha=.4;ctx.strokeStyle='#fff';ctx.lineWidth=.5;ctx.stroke()}});
+    // Now draw extra points ON TOP with strong visibility
+    extraPoints.forEach(ep=>{if(!isFinite(ep.x)||!isFinite(ep.y))return;const px=sx(ep.x),py=sy(ep.y);const sz=ep.size||5;ctx.globalAlpha=.9;ctx.fillStyle=ep.color;ctx.beginPath();ctx.arc(px,py,sz,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.beginPath();ctx.arc(px,py,sz,0,Math.PI*2);ctx.stroke()});
+    // Legend for extra points
+    if(extraPoints.length>0){ctx.globalAlpha=1;ctx.font='bold 9px DM Sans';ctx.textAlign='left';
+      const purPts=extraPoints.filter(e=>e.color==='#8b5cf6');const orgPts=extraPoints.filter(e=>e.color==='#f5a623');const redPts=extraPoints.filter(e=>e.color==='#ef4444');
+      let ly=mg.t+12;
+      if(purPts.length){ctx.fillStyle='#8b5cf6';ctx.fillText('🟣 Parents sélectionnés ('+purPts.length+')',mg.l+4,ly);ly+=12}
+      if(orgPts.length){ctx.fillStyle='#f5a623';ctx.fillText('🟠 Enfants croisement ('+orgPts.length+')',mg.l+4,ly);ly+=12}
+      if(redPts.length){ctx.fillStyle='#ef4444';ctx.fillText('🔴 Enfants mutés ('+redPts.length+')',mg.l+4,ly)}
+    };
+    highlights.forEach(hl=>{if(!isFinite(hl.x)||!isFinite(hl.y))return;ctx.globalAlpha=1;ctx.strokeStyle=hl.color;ctx.lineWidth=2;ctx.beginPath();ctx.arc(sx(hl.x),sy(hl.y),8,0,Math.PI*2);ctx.stroke();ctx.lineWidth=1;ctx.strokeStyle=hl.color+'40';ctx.beginPath();ctx.arc(sx(hl.x),sy(hl.y),12,0,Math.PI*2);ctx.stroke()});
+    ctx.globalAlpha=1
+  },[data,xL,yL,title,w,h,colorBy,showLine,highlights,extraPoints]);
+  return <canvas ref={ref} style={{borderRadius:8}}/>;
+}
+function LChart({series,xL,yL,title,w=400,h=270}){
+  const ref=useRef();
+  useEffect(()=>{const c=ref.current;if(!c)return;const ctx=c.getContext('2d');const dpr=window.devicePixelRatio||1;c.width=w*dpr;c.height=h*dpr;c.style.width=w+'px';c.style.height=h+'px';ctx.scale(dpr,dpr);ctx.clearRect(0,0,w,h);if(!series||!series.length||!series[0].data.length)return;const mg={t:26,r:14,b:34,l:52},cw=w-mg.l-mg.r,ch=h-mg.t-mg.b;let aX=[],aY=[];series.forEach(s=>s.data.forEach(d=>{aX.push(d.x);aY.push(d.y)}));aX=aX.filter(isFinite);aY=aY.filter(isFinite);if(!aX.length)return;let x0=Math.min(...aX),x1=Math.max(...aX),y0=Math.min(...aY),y1=Math.max(...aY);if(x0===x1){x0-=1;x1+=1}if(y0===y1){y0-=1;y1+=1}const xp=(x1-x0)*.05,yp=(y1-y0)*.08;x0-=xp;x1+=xp;y0-=yp;y1+=yp;const sx=v=>mg.l+(v-x0)/(x1-x0)*cw,sy=v=>mg.t+ch-(v-y0)/(y1-y0)*ch;ctx.strokeStyle='#121e2e';ctx.lineWidth=.5;for(let i=0;i<=5;i++){let gx=mg.l+cw*i/5;ctx.beginPath();ctx.moveTo(gx,mg.t);ctx.lineTo(gx,mg.t+ch);ctx.stroke();let gy=mg.t+ch*i/5;ctx.beginPath();ctx.moveTo(mg.l,gy);ctx.lineTo(mg.l+cw,gy);ctx.stroke()}ctx.strokeStyle='#1e2d3d';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(mg.l,mg.t+ch);ctx.lineTo(mg.l+cw,mg.t+ch);ctx.stroke();ctx.beginPath();ctx.moveTo(mg.l,mg.t);ctx.lineTo(mg.l,mg.t+ch);ctx.stroke();ctx.fillStyle='#3e5a70';ctx.font='8px JetBrains Mono';ctx.textAlign='center';for(let i=0;i<=5;i++)ctx.fillText(Math.round(x0+(x1-x0)*i/5),mg.l+cw*i/5,mg.t+ch+12);ctx.textAlign='right';for(let i=0;i<=5;i++)ctx.fillText((y0+(y1-y0)*(5-i)/5).toPrecision(3),mg.l-4,mg.t+ch*i/5+3);ctx.fillStyle='#5a8aaa';ctx.font='500 9px JetBrains Mono';ctx.textAlign='center';ctx.fillText(xL,mg.l+cw/2,h-2);ctx.save();ctx.translate(9,mg.t+ch/2);ctx.rotate(-Math.PI/2);ctx.fillText(yL,0,0);ctx.restore();ctx.fillStyle='#a0b8cc';ctx.font='600 10px DM Sans';ctx.fillText(title,w/2,13);ctx.textAlign='start';series.forEach(s=>{const pts=s.data.filter(d=>isFinite(d.x)&&isFinite(d.y));if(pts.length<2)return;ctx.strokeStyle=s.color;ctx.lineWidth=2;ctx.globalAlpha=.9;ctx.beginPath();ctx.moveTo(sx(pts[0].x),sy(pts[0].y));pts.forEach(p=>ctx.lineTo(sx(p.x),sy(p.y)));ctx.stroke();const l=pts[pts.length-1];ctx.fillStyle=s.color;ctx.beginPath();ctx.arc(sx(l.x),sy(l.y),4,0,Math.PI*2);ctx.fill();ctx.font='9px JetBrains Mono';ctx.fillText(s.label+'='+l.y.toPrecision(4),sx(l.x)+8,sy(l.y)+3)});ctx.globalAlpha=1},[series,xL,yL,title,w,h]);
+  return <canvas ref={ref} style={{borderRadius:8}}/>;
+}
+
+function MathKB({target,onInsert,onClose}){
+  const G=[{l:'Ops',k:['+','-','*','/','^','(',')']},{l:'Func',k:['sqrt(','sin(','cos(','exp(','abs(','log(']},{l:'Const',k:['pi','e','2','10']},{l:'Var',k:['x1','x2','x3','x4']}];
+  return(<div style={{background:'#0c1420',border:'1px solid #1a2a3a',borderRadius:8,padding:'8px 10px',marginBottom:6}}>
+    <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}><span style={{fontSize:8.5,color:'#4a6a8a',fontWeight:600}}>⌨️ → {target}</span><button onClick={onClose} style={{background:'none',border:'none',color:'#3e5060',cursor:'pointer',fontSize:11}}>✕</button></div>
+    {G.map(g=>(<div key={g.l} style={{marginBottom:2}}><span style={{fontSize:7,color:'#1e3040',marginRight:3}}>{g.l}</span>{g.k.map(k=>(<button key={k} onClick={()=>onInsert(k)} style={{background:'#111825',border:'1px solid #1e2d3d',borderRadius:4,color:'#7ecbf5',padding:'2px 6px',fontSize:9,cursor:'pointer',margin:1,fontFamily:'JetBrains Mono'}} onMouseOver={e=>e.target.style.background='#1e2d3d'} onMouseOut={e=>e.target.style.background='#111825'}>{k}</button>))}</div>))}
+  </div>);
+}
+
+function checkConv(hist,nObj,win,eps){
+  if(hist.length<win+1)return{ok:false,deltas:[],reason:null};
+  const cur=hist[hist.length-1],prev=hist[hist.length-1-win];const deltas=[];let ok=true;
+  for(let k=0;k<nObj;k++){const ck=cur['mf'+(k+1)],pk=prev['mf'+(k+1)];if(!isFinite(ck)||!isFinite(pk)){ok=false;deltas.push(NaN);continue}const d=Math.abs(ck-pk)/(Math.abs(pk)>1e-12?Math.abs(pk):1);deltas.push(d);if(d>eps)ok=false}
+  return{ok,deltas,reason:ok?'Stable sur '+win+' gén. — '+deltas.map((d,k)=>'Δf'+(k+1)+'='+(d*100).toFixed(3)+'%').join(', '):null};
+}
+
+/* ===== APP ===== */
+function App(){
+  const[preset,setPreset]=useState("binh");
+  const[nVar,setNVar]=useState(2);const[bounds,setBounds]=useState([[0,5],[0,3]]);const[vt,setVt]=useState(['cont','cont']);
+  const[oE,setOE]=useState(["4*x1^2+4*x2^2","(x1-5)^2+(x2-5)^2"]);
+  const[cE,setCE]=useState(["(x1-5)^2+x2^2-25","-(x1-8)^2-(x2+3)^2+7.7"]);
+  const[P,setP]=useState({nPop:80,nGen:200,etaC:20,etaM:20,pCross:0.9});
+  const[cWin,setCWin]=useState(50);const[cEps,setCEps]=useState(0.001);
+  const[pop,setPop]=useState(null);const[selParents,setSelP]=useState(null);const[offspring,setOff]=useState(null);
+  const[tourneyLog,setTourneyLog]=useState([]);
+  const[gen,setGen]=useState(0);const[si,setSi]=useState(-1);
+  const[running,setRunning]=useState(false);const[mode,setMode]=useState('gmax');
+  const[hist,setHist]=useState([]);const[speed,setSpeed]=useState(60);
+  const[kbT,setKbT]=useState(null);const[kbI,setKbI]=useState(null);const[showKb,setShowKb]=useState(false);
+  const[ci,setCi]=useState({ok:false,deltas:[],reason:null});
+  const[tab,setTab]=useState('guide');const[log,setLog]=useState('');const[mutCount,setMutCount]=useState(0);
+  const rr=useRef(false);
+
+  const load=useCallback(k=>{setPreset(k);const p=PRESETS[k];if(p){setNVar(p.nVar);setBounds(p.bounds.map(b=>[...b]));setVt([...p.types]);setOE([...p.objs]);setCE([...p.constrs])}setPop(null);setSelP(null);setOff(null);setGen(0);setSi(-1);setHist([]);setCi({ok:false,deltas:[],reason:null});setLog('');setTourneyLog([])},[]);
+  const builtinKey=PRESETS[preset]?.builtin||null;
+
+  const mkH=useCallback((g,pop)=>{const pa=pop.filter(p=>p.rank===0&&p.feasible);const e={g,np:pa.length};const nObj=pa.length?pa[0].obj.length:(oE.length||2);for(let k=0;k<nObj;k++){const vals=pa.map(p=>p.obj[k]).filter(isFinite);e['mf'+(k+1)]=vals.length?Math.min(...vals):Infinity}return e},[oE]);
+
+  const init=useCallback(()=>{
+    const p=[];for(let i=0;i<P.nPop;i++){const x=bounds.map((b,j)=>{const v=b[0]+Math.random()*(b[1]-b[0]);return vt[j]==='discrete'?Math.round(v):v});p.push(new Ind(x))}
+    setPop([...p]);setSelP(null);setOff(null);setGen(0);setSi(0);setTourneyLog([]);setMutCount(0);
+    setHist([]);setCi({ok:false,deltas:[],reason:null});
+    setLog('✅ '+P.nPop+' individus créés. Cliquez "+1 étape" pour évaluer ou "▶" pour lancer.');
+  },[bounds,vt,P.nPop]);
+
+  const advance=useCallback(()=>{
+    if(!pop||si<0)return{done:false,converged:false};
+    let np=[...pop],ng=gen,nPar=selParents,nOff=offspring,lg='',conv=false;
+    np.forEach(d=>{d.isParent=false});// Reset markers
+
+    if(si===0){// EVAL
+      evalPop(np,oE,cE,builtinKey);const ff=nds(np);ff.forEach(f=>cdist(np,f));
+      const pa=np.filter(p=>p.rank===0&&p.feasible);
+      const nFronts=ff.length;
+      lg='📊 Évaluation terminée. '+nFronts+' fronts identifiés. Front Pareto : '+pa.length+' solutions non-dominées'+(cE.length?' ('+np.filter(p=>p.feasible).length+' admissibles sur '+np.length+')':'.')+'.';
+    } else if(si===1){// CHECK
+      const h=[...hist,mkH(ng,np)];setHist(h);
+      const nObjActual=builtinKey?2:(oE.length||2);const c=checkConv(h,nObjActual,cWin,cEps);setCi(c);conv=c.ok;
+      if(c.ok)lg='🛑 CONVERGENCE ! '+c.reason;
+      else{
+        const need=Math.max(0,cWin+1-h.length);
+        lg='🔍 Gén '+ng+' — '+(need>0?'Encore '+need+' gén. avant de pouvoir vérifier (fenêtre='+cWin+').':'Variations : '+c.deltas.map((d,k)=>'Δf'+(k+1)+'='+(isFinite(d)?(d*100).toFixed(2)+'%':'?')).join(', ')+' — seuil: '+(cEps*100).toFixed(2)+'%. → On continue.');
+      }
+    } else if(si===2){// SELECT
+      const ff=nds(np);ff.forEach(f=>cdist(np,f));
+      const{selected,pairs}=tsel(np,P.nPop);
+      nPar=selected;setSelP(nPar);
+      // Mark selected as parents
+      const parentIndices=new Set(pairs.map(p=>p.winner));
+      parentIndices.forEach(idx=>{if(np[idx])np[idx].isParent=true});
+      // Show some tourney examples
+      const examples=pairs.slice(0,5).map(p=>{
+        const a=np[p.a],b=np[p.b],w=np[p.winner];
+        return{aRank:a?a.rank:'?',bRank:b?b.rank:'?',aCd:a?a.cd:0,bCd:b?b.cd:0,winner:p.winner===p.a?'A':'B'};
+      });
+      setTourneyLog(examples);
+      lg='🏆 '+P.nPop+' parents sélectionnés par tournoi. '+parentIndices.size+' individus uniques retenus (certains choisis plusieurs fois = avantage sélectif).';
+    } else if(si===3){// CROSS
+      if(!nPar){setSi(2);setPop(np);setLog('⚠️ Sélection manquante.');return{done:false,converged:false}}
+      const off=[];for(let i=0;i<P.nPop;i+=2){let[c1,c2]=sbx(nPar[i%nPar.length],nPar[(i+1)%nPar.length],bounds,vt,P.etaC,P.pCross);off.push(c1,c2)}
+      nOff=off.slice(0,P.nPop);
+      // Evaluate offspring NOW so they can be displayed on the chart
+      evalPop(nOff,oE,cE,builtinKey);
+      setOff(nOff);
+      const nValid=nOff.filter(d=>d.obj.every(isFinite)).length;
+      lg='🧬 '+nOff.length+' enfants créés par croisement SBX (η_c='+P.etaC+', P='+P.pCross+'). '+nValid+' évalués → affichés en 🟠 orange sur le graphique.';
+    } else if(si===4){// MUTATE
+      if(!nOff){setSi(3);setPop(np);setLog('⚠️ Croisement manquant.');return{done:false,converged:false}}
+      nOff.forEach(d=>pmut(d,bounds,vt,P.etaM));evalPop(nOff,oE,cE,builtinKey);
+      const mc=nOff.filter(d=>d.justMutated).length;setMutCount(mc);setOff([...nOff]);
+      lg='⚡ Mutation polynomiale : '+mc+'/'+nOff.length+' enfants mutés (η_m='+P.etaM+', P=1/'+nVar+'='+(1/nVar).toFixed(2)+'). Enfants évalués. Points mutés en rouge sur le graphique.';
+    } else if(si===5){// REPLACE
+      if(!nOff){setSi(4);setPop(np);setLog('⚠️ Mutation manquante.');return{done:false,converged:false}}
+      const before=np.filter(p=>p.rank===0&&p.feasible).length;
+      np=doReplace(np,nOff,P.nPop);ng=gen+1;setGen(ng);setSelP(null);setOff(null);setTourneyLog([]);
+      const after=np.filter(p=>p.rank===0&&p.feasible).length;
+      lg='🔄 Remplacement (μ+λ) : '+(P.nPop*2)+' candidats → '+P.nPop+' retenus. → Génération '+ng+'. Pareto : '+before+' → '+after+' solutions.';
+    }
+
+    setPop([...np]);setLog(lg);setSi((si+1)%6);
+    return{done:si===5,converged:conv};
+  },[pop,si,gen,selParents,offspring,oE,cE,bounds,vt,P,hist,mkH,cWin,cEps,nVar,builtinKey]);
+
+  const advRef=useRef(advance);advRef.current=advance;const genRef=useRef(gen);genRef.current=gen;
+
+  const goAuto=useCallback(m=>{setMode(m);rr.current=true;setRunning(true);const loop=()=>{if(!rr.current){setRunning(false);return}const r=advRef.current();if(m==='gmax'&&r.done&&genRef.current>=P.nGen){rr.current=false;setRunning(false);return}if(m==='converge'&&r.converged){rr.current=false;setRunning(false);return}setTimeout(loop,speed)};setTimeout(loop,20)},[P.nGen,speed]);
+  const stop=useCallback(()=>{rr.current=false;setRunning(false)},[]);
+  const insKb=useCallback(k=>{if(kbT==='obj'&&kbI!=null)setOE(o=>{const n=[...o];n[kbI]=(n[kbI]||'')+k;return n});if(kbT==='con'&&kbI!=null)setCE(c=>{const n=[...c];n[kbI]=(n[kbI]||'')+k;return n})},[kbT,kbI]);
+
+  // Chart data — robust, handles NaN
+  const cd=useMemo(()=>{if(!pop)return null;const d=pop.filter(p=>p.obj.length>=2&&isFinite(p.obj[0])&&isFinite(p.obj[1])).map(p=>({x:p.obj[0],y:p.obj[1],rank:p.rank,feasible:p.feasible}));return d.length?d:null},[pop]);
+  const dd=useMemo(()=>{if(!pop||nVar<2)return null;return pop.map(d=>({x:d.x[0],y:d.x[1],rank:d.rank,feasible:d.feasible}))},[pop,nVar]);
+
+  // Extra points for offspring/parents visualization
+  const extraPts=useMemo(()=>{
+    const pts=[];
+    // During SELECTION step (si===3 means we just did select, showing parents)
+    // si is already advanced, so after select si=3 (cross). We need to check what just happened.
+    // Actually si is the NEXT step. So if si===3 (about to do cross), we just did select → show parents
+    if(si===3 && pop){
+      pop.forEach(d=>{
+        if(d.isParent && d.obj.length>=2 && isFinite(d.obj[0]) && isFinite(d.obj[1])){
+          pts.push({x:d.obj[0],y:d.obj[1],color:'#8b5cf6',size:6})
+        }
+      });
+    }
+    // During CROSS (si===4, just did cross) and MUTATE (si===5, just did mutate) → show offspring
+    if((si===4||si===5) && offspring){
+      offspring.forEach(d=>{
+        if(d.obj.length>=2&&isFinite(d.obj[0])&&isFinite(d.obj[1])){
+          pts.push({x:d.obj[0],y:d.obj[1],color:d.justMutated?'#ef4444':'#f5a623',size:d.justMutated?6:5})
+        }
+      });
+    }
+    return pts;
+  },[offspring,pop,si]);
+
+  const nObjEff=useMemo(()=>builtinKey?2:(oE.length||2),[builtinKey,oE]);
+  const cs=useMemo(()=>hist.length<2?[]:Array.from({length:nObjEff},(_,k)=>({label:'min f'+(k+1),color:['#7ecbf5','#f5a623','#e85d75'][k%3],data:hist.map(h=>({x:h.g,y:h['mf'+(k+1)]})).filter(d=>isFinite(d.y))})),[hist,nObjEff]);
+  const st=useMemo(()=>{if(!pop)return null;const pa=pop.filter(p=>p.rank===0&&p.feasible);return{np:pa.length,nf:pop.filter(p=>p.feasible).length,nFr:nds(pop).length}},[pop]);
+  const best=useMemo(()=>{if(!pop)return[];const pa=pop.filter(p=>p.rank===0&&p.feasible&&p.obj.length>=2&&p.obj.every(isFinite));if(pa.length<2)return[];const b1=pa.reduce((a,b)=>a.obj[0]<b.obj[0]?a:b);const b2=pa.reduce((a,b)=>a.obj[1]<b.obj[1]?a:b);const objArr=Array.from({length:nObjEff},(_,k)=>k);const mn=objArr.map(k=>Math.min(...pa.map(p=>p.obj[k]))),mx=objArr.map(k=>Math.max(...pa.map(p=>p.obj[k])));const rng=objArr.map(k=>mx[k]-mn[k]||1);const comp=pa.reduce((a,b)=>{const da=objArr.reduce((s,k)=>s+Math.pow((a.obj[k]-mn[k])/rng[k],2),0);const db=objArr.reduce((s,k)=>s+Math.pow((b.obj[k]-mn[k])/rng[k],2),0);return da<db?a:b});return[{ind:b1,l:'⬇ Best f₁',c:'#7ecbf5'},{ind:b2,l:'⬇ Best f₂',c:'#f5a623'},{ind:comp,l:'⚖ Compromis',c:'#4ade80'}]},[pop,nObjEff]);
+  const hl=useMemo(()=>best.map(b=>({x:b.ind.obj[0],y:b.ind.obj[1],color:b.c})),[best]);
+  const IS={background:'#0e1620',border:'1px solid #1e2d3d',borderRadius:5,color:'#c8dce8',padding:'4px 6px',fontSize:10.5,fontFamily:'JetBrains Mono',outline:'none'};
+  const CB={background:'#0b1018',border:'1px solid #141e2c',borderRadius:10,padding:6,flex:'1 1 380px',minWidth:320};
+  const curS=si>=0?STEPS[si]:null;
+
+  return(<div style={{height:'100vh',display:'flex',flexDirection:'column',background:'#080c14'}}>
+    {/* TOP BAR */}
+    <div className="topbar">
+      <div style={{display:'flex',alignItems:'center',gap:8,padding:'7px 0',flexWrap:'wrap'}}>
+        <span style={{fontSize:16,fontWeight:800,color:'#7ecbf5',fontFamily:'JetBrains Mono',flexShrink:0}}>NSGA-II</span>
+        <div style={{display:'flex',gap:4,flexShrink:0}}>
+          <button className="btn" onClick={init} style={{background:'#7ecbf512',borderColor:'#7ecbf540',color:'#7ecbf5',padding:'5px 12px'}}>🎲 Init</button>
+          <button className="btn" onClick={advance} disabled={!pop||running||si<0} style={{background:'#f5a62312',borderColor:'#f5a62340',color:'#f5a623',padding:'5px 12px'}}>+1 étape</button>
+          {!running?(<>
+            <button className="btn" onClick={()=>goAuto('gmax')} disabled={!pop||si<0} style={{background:'#4ade8012',borderColor:'#4ade8040',color:'#4ade80',padding:'5px 12px'}}>▶ G_max ({P.nGen})</button>
+            <button className="btn" onClick={()=>goAuto('converge')} disabled={!pop||si<0} style={{background:'#8b5cf612',borderColor:'#8b5cf640',color:'#8b5cf6',padding:'5px 12px'}}>▶ Auto</button>
+          </>):(<button className="btn" onClick={stop} style={{background:'#e85d7512',borderColor:'#e85d7540',color:'#e85d75',padding:'5px 12px'}}>■ Stop</button>)}
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:3}}><span style={{fontSize:8,color:'#2e4050'}}>🐢</span><input type="range" min={10} max={500} step={10} value={510-speed} onChange={e=>setSpeed(510-+e.target.value)} style={{width:50}}/><span style={{fontSize:8,color:'#2e4050'}}>🐇</span></div>
+        <div style={{display:'flex',gap:5,marginLeft:'auto',alignItems:'center'}}>
+          {gen>0&&<span style={{background:'#7ecbf510',border:'1px solid #7ecbf520',borderRadius:5,padding:'2px 8px',fontSize:10,color:'#7ecbf5',fontFamily:'JetBrains Mono',fontWeight:700}}>Gén {gen}</span>}
+          {curS&&<span style={{background:curS.color+'10',border:'1px solid '+curS.color+'20',borderRadius:5,padding:'2px 8px',fontSize:9,color:curS.color}}>{curS.icon} {curS.label} ({si+1}/6)</span>}
+          {st&&<span style={{background:'#f5a62310',border:'1px solid #f5a62320',borderRadius:5,padding:'2px 8px',fontSize:9,color:'#f5a623',fontFamily:'JetBrains Mono'}}>Pareto:{st.np}</span>}
+          {ci.ok&&<span style={{background:'#4ade8010',border:'1px solid #4ade8020',borderRadius:5,padding:'2px 8px',fontSize:9,color:'#4ade80',fontWeight:600}}>✅ Convergé</span>}
+        </div>
+      </div>
+      {/* Mini flowchart */}
+      <div style={{display:'flex',alignItems:'center',gap:2,paddingBottom:6,justifyContent:'center'}}>
+        {STEPS.map((s,i)=>{const a=i===si,done=i<si;return(<React.Fragment key={s.id}><div style={{padding:'2px 6px',textAlign:'center',background:a?s.color+'15':'transparent',border:'1px solid '+(a?s.color+'50':done?'#4ade8020':'#14202e'),borderRadius:5,color:a?s.color:done?'#4ade80':'#14202e',fontSize:8,fontWeight:a?700:400,transition:'all .2s'}}><span style={{fontSize:10}}>{s.icon}</span> {s.label}</div>{i<5&&<span style={{color:done?'#4ade8025':'#0e1620',fontSize:8}}>→</span>}</React.Fragment>)})}<span style={{color:'#14202e',fontSize:7}}>↩</span>
+      </div>
+    </div>
+
+    {/* BODY */}
+    <div style={{display:'flex',flex:1,overflow:'hidden'}}>
+      {/* LEFT */}
+      <div style={{width:310,minWidth:310,borderRight:'1px solid #141e2c',display:'flex',flexDirection:'column',background:'#090d16'}}>
+        <div style={{display:'flex',borderBottom:'1px solid #141e2c'}}>
+          {[{id:'guide',l:'📖 Théorie'},{id:'problem',l:'⚙️ Problème'},{id:'params',l:'🎛 Params'}].map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:'7px',background:tab===t.id?'#0c1220':'transparent',border:'none',borderBottom:tab===t.id?'2px solid #7ecbf5':'2px solid transparent',color:tab===t.id?'#7ecbf5':'#2e4a60',fontSize:9.5,cursor:'pointer',fontFamily:'DM Sans',fontWeight:tab===t.id?600:400}}>{t.l}</button>))}
+        </div>
+        <div style={{flex:1,overflowY:'auto',padding:'10px 12px',fontSize:11,color:'#8098b0',lineHeight:1.65}}>
+        {tab==='guide'&&(<div>
+          <div className="sec"><div className="stit">📌 Qu'est-ce que NSGA-II ?</div>
+            <p>NSGA-II (Non-dominated Sorting Genetic Algorithm II) est un <b style={{color:'#7ecbf5'}}>algorithme génétique</b> conçu pour l'<b style={{color:'#f5a623'}}>optimisation multi-objectifs</b>. Contrairement à une optimisation classique qui cherche UN minimum, ici on a <b>plusieurs objectifs contradictoires</b> : améliorer l'un dégrade l'autre.</p>
+            <p style={{marginTop:6}}>L'algorithme ne donne pas UNE solution mais un <b style={{color:'#f5a623'}}>ensemble de compromis</b> appelé <b>front de Pareto</b>.</p>
+          </div>
+
+          <div className="sec"><div className="stit">📐 Variables de conception</div>
+            <p>Les <b style={{color:'#7ecbf5'}}>variables x₁, x₂, ...</b> sont les "boutons" que l'algorithme peut régler. Chacune a des bornes [min, max].</p>
+            <p style={{marginTop:4}}>Deux types :</p>
+            <p>• <b style={{color:'#4ade80'}}>Continue</b> : toute valeur décimale (ex: dimensions, températures)</p>
+            <p>• <b style={{color:'#f5a623'}}>Discrète</b> : entiers uniquement (ex: nombre de boulons, épaisseurs standard)</p>
+            <p style={{marginTop:4}}>L'ensemble de toutes les combinaisons possibles forme l'<b>espace de conception</b>.</p>
+          </div>
+
+          <div className="sec"><div className="stit">🎯 Fonctions objectifs</div>
+            <p>On cherche à <b style={{color:'#e85d75'}}>minimiser</b> simultanément f₁(x), f₂(x), ... Ce sont des critères souvent contradictoires (ex: minimiser le poids ET minimiser le coût).</p>
+            <div className="formula">min f(x) = [f₁(x), f₂(x), ...]ᵀ</div>
+            <p style={{marginTop:4}}>Pour maximiser un objectif, inversez le signe : "maximiser g" = écrire "-g".</p>
+          </div>
+
+          <div className="sec"><div className="stit">🚧 Contraintes</div>
+            <p>Les contraintes limitent l'espace de recherche. Elles s'écrivent sous la forme <b style={{color:'#e85d75'}}>g(x) ≤ 0</b>.</p>
+            <p style={{marginTop:4}}>Exemples :</p>
+            <p>• x₁ + x₂ ≤ 8 → écrire "<span style={{color:'#7ecbf5'}}>x1+x2-8</span>"</p>
+            <p>• x₁ ≥ 2 → écrire "<span style={{color:'#7ecbf5'}}>2-x1</span>"</p>
+            <p style={{marginTop:4}}>Un individu qui viole une contrainte est dit <b style={{color:'#e85d75'}}>non admissible</b>. NSGA-II pénalise ces individus : un admissible domine toujours un non-admissible.</p>
+          </div>
+
+          <div className="sec"><div className="stit">👑 Dominance de Pareto</div>
+            <p>Une solution <b>A domine B</b> si A est au moins aussi bonne que B sur TOUS les objectifs, et strictement meilleure sur au moins un.</p>
+            <div className="formula">A ≺ B ⟺ ∀i: fᵢ(A) ≤ fᵢ(B) ET ∃j: fⱼ(A) {'<'} fⱼ(B)</div>
+            <p style={{marginTop:4}}>Les solutions <b style={{color:'#f5a623'}}>non dominées</b> forment le <b>Front de Pareto</b> (Front 1). Aucune ne peut être améliorée sur un objectif sans en dégrader un autre.</p>
+          </div>
+
+          <div className="sec"><div className="stit">📊 Crowding Distance</div>
+            <p>Sur un même front, on veut des solutions <b>bien espacées</b> (diversité). La crowding distance mesure l'espacement autour de chaque solution.</p>
+            <p style={{marginTop:4}}>Plus la distance est grande, plus la solution est "isolée" → elle est préservée car elle apporte de la diversité au front.</p>
+          </div>
+
+          <div className="sec"><div className="stit">🏆 Sélection par tournoi</div>
+            <p>On tire <b>2 individus au hasard</b>. Le gagnant est celui avec :</p>
+            <p>1. Le <b style={{color:'#8b5cf6'}}>meilleur rang</b> (front le plus bas)</p>
+            <p>2. Si même rang : la plus grande <b style={{color:'#8b5cf6'}}>crowding distance</b></p>
+            <p style={{marginTop:4}}>Ce processus est répété N_pop fois pour former les parents.</p>
+          </div>
+
+          <div className="sec"><div className="stit">🧬 Croisement SBX</div>
+            <p>Deux parents → deux enfants. Le Simulated Binary Crossover est l'analogue continu du croisement en 1 point binaire.</p>
+            <div className="formula">Eᵢ = P₁ + Aᵢ(P₂ − P₁)</div>
+            <p style={{marginTop:4}}>Le paramètre <b style={{color:'#4ade80'}}>η_c</b> contrôle la dispersion :</p>
+            <p>• <b>η_c petit (2-5)</b> → enfants éloignés des parents → <b>exploration</b></p>
+            <p>• <b>η_c grand (20+)</b> → enfants proches → <b>exploitation</b> (affinage local)</p>
+          </div>
+
+          <div className="sec"><div className="stit">⚡ Mutation polynomiale</div>
+            <p>Perturbation aléatoire de chaque gène avec probabilité 1/n_var.</p>
+            <div className="formula">x*ᵢ = xᵢ + δᵢ × Δm</div>
+            <p style={{marginTop:4}}><b style={{color:'#f59e0b'}}>η_m</b> : petit = grandes mutations (exploration), grand = petites (exploitation).</p>
+            <p style={{marginTop:4}}>La mutation maintient la diversité et empêche la convergence prématurée.</p>
+          </div>
+
+          <div className="sec"><div className="stit">🔄 Remplacement (μ+λ)</div>
+            <p>On combine parents (N_pop) + enfants (N_pop) = 2N_pop individus. On trie par fronts et crowding distance, et on ne garde que les N_pop meilleurs.</p>
+            <p style={{marginTop:4,color:'#7ecbf5'}}><b>C'est à cette étape que la génération incrémente de +1.</b></p>
+          </div>
+
+          <div className="sec"><div className="stit">🔍 Critère d'arrêt</div>
+            <p>Deux modes disponibles :</p>
+            <p><b style={{color:'#4ade80'}}>▶ G_max</b> — Nombre fixe de générations. Simple et prévisible.</p>
+            <p><b style={{color:'#8b5cf6'}}>▶ Auto</b> — S'arrête quand les <b>valeurs optimales</b> (min f₁, min f₂...) ne bougent plus.</p>
+            <div className="formula">Convergence si ∀k : |min fₖ(g) − min fₖ(g−N)| / |min fₖ(g−N)| {'<'} ε</div>
+            <p style={{marginTop:4}}>Réglable : <b>N</b> (fenêtre, en générations) et <b>ε</b> (seuil de variation).</p>
+            <p>N grand = prudent (sûr que c'est stable). ε petit = très exigeant.</p>
+          </div>
+
+          <div className="sec"><div className="stit">🏆 Comment choisir la solution finale ?</div>
+            <p>Le front de Pareto contient un <b>ensemble</b> de solutions équivalentes. Aucune n'est objectivement meilleure — c'est au <b style={{color:'#7ecbf5'}}>concepteur</b> de choisir selon ses priorités :</p>
+            <p>• <span style={{color:'#7ecbf5'}}>● Bleu</span> = minimise f₁ au maximum</p>
+            <p>• <span style={{color:'#f5a623'}}>● Orange</span> = minimise f₂ au maximum</p>
+            <p>• <span style={{color:'#4ade80'}}>● Vert</span> = compromis équilibré (proche du point utopique)</p>
+          </div>
+        </div>)}
+
+        {tab==='problem'&&(<div>
+          <div className="sec"><div className="stit">📋 Problème</div><select value={preset} onChange={e=>load(e.target.value)} style={{width:'100%',background:'#0e1620',border:'1px solid #1e2d3d',borderRadius:6,color:'#7ecbf5',padding:'7px',fontSize:11,fontFamily:'DM Sans',cursor:'pointer'}}>
+            <optgroup label="📗 Simples (pour apprendre)">{Object.entries(PRESETS).filter(([_,v])=>v.cat==='simple').map(([k,v])=><option key={k} value={k}>{v.name}</option>)}</optgroup>
+            <optgroup label="📕 Benchmarks avancés">{Object.entries(PRESETS).filter(([_,v])=>v.cat==='bench').map(([k,v])=><option key={k} value={k}>{v.name}</option>)}</optgroup>
+            <optgroup label="✏️ Libre">{Object.entries(PRESETS).filter(([_,v])=>v.cat==='custom').map(([k,v])=><option key={k} value={k}>{v.name}</option>)}</optgroup>
+          </select><div className="tip">{PRESETS[preset]?.desc}{builtinKey?' ⚡ Évaluation native (rapide).':''}</div></div>
+          <div className="sec"><div className="stit">📐 Variables ({nVar}){nVar>6?' — affichage limité':''}</div>
+            {builtinKey&&nVar>6?(<div style={{fontSize:10,color:'#5a8aaa',background:'#0c1420',borderRadius:6,padding:8,border:'1px solid #1a2a3a'}}>{nVar} variables continues dans [{bounds[0][0]}, {bounds[0][1]}]{nVar>1&&bounds[nVar-1][0]!==bounds[0][0]?' (bornes variables)':''}. Configuration fixée par le benchmark.</div>):(<>
+            {bounds.map((b,i)=>(<div key={i} style={{display:'flex',gap:3,marginBottom:2,alignItems:'center'}}><span style={{fontSize:9,color:'#5a7a9a',width:18,fontFamily:'JetBrains Mono'}}>x{i+1}</span><input value={b[0]} type="number" step="any" onChange={e=>{const nb=bounds.map(b=>[...b]);nb[i][0]=parseFloat(e.target.value)||0;setBounds(nb)}} style={{...IS,width:48}}/><span style={{color:'#1e2d3d',fontSize:8}}>à</span><input value={b[1]} type="number" step="any" onChange={e=>{const nb=bounds.map(b=>[...b]);nb[i][1]=parseFloat(e.target.value)||1;setBounds(nb)}} style={{...IS,width:48}}/><button onClick={()=>{const nt=[...vt];nt[i]=nt[i]==='cont'?'discrete':'cont';setVt(nt)}} style={{background:vt[i]==='discrete'?'#f5a62312':'#0e1620',border:'1px solid '+(vt[i]==='discrete'?'#f5a62330':'#1e2d3d'),borderRadius:4,color:vt[i]==='discrete'?'#f5a623':'#3e5060',padding:'2px 6px',fontSize:8,cursor:'pointer',fontFamily:'JetBrains Mono'}}>{vt[i]==='discrete'?'Disc':'Cont'}</button></div>))}
+            {!builtinKey&&<div style={{display:'flex',gap:3,marginTop:3}}><button onClick={()=>{setNVar(n=>n+1);setBounds(b=>[...b,[0,1]]);setVt(t=>[...t,'cont'])}} style={{background:'#0e1620',border:'1px solid #1e2d3d',borderRadius:4,color:'#5a7a9a',padding:'3px 8px',fontSize:9,cursor:'pointer'}}>+</button>{nVar>1&&<button onClick={()=>{setNVar(n=>n-1);setBounds(b=>b.slice(0,-1));setVt(t=>t.slice(0,-1))}} style={{background:'#0e1620',border:'1px solid #1e2d3d',borderRadius:4,color:'#5a7a9a',padding:'3px 8px',fontSize:9,cursor:'pointer'}}>−</button>}</div>}
+            </>)}
+          </div>
+          {builtinKey?(<div className="sec">
+            <div className="stit">⚡ Fonction intégrée : {builtinKey.toUpperCase()}</div>
+            <div style={{fontSize:10,color:'#5a8aaa',lineHeight:1.6,background:'#0c1420',borderRadius:6,padding:8,border:'1px solid #1a2a3a'}}>
+              Ce benchmark utilise une évaluation native optimisée (pas d'expressions à éditer). Les fonctions sont codées en dur pour la performance.
+              <div style={{marginTop:6,color:'#3e5a70'}}>{nVar} variables, 2 objectifs{PRESETS[preset]?.constrs?.length||BUILTIN[builtinKey]?', contraintes intégrées':''}</div>
+            </div>
+          </div>):(<>
+          <div className="sec"><div className="stit">🎯 Objectifs (min)</div>
+            <div className="tip" style={{marginBottom:4}}>Utilisez x1,x2... Fonctions: sqrt, sin, cos, exp, abs, log. Pour maximiser, écrivez -f.</div>
+            {oE.map((expr,i)=>(<div key={i} style={{display:'flex',gap:3,marginBottom:2,alignItems:'center'}}><span style={{fontSize:9,color:'#f5a623',width:14,fontFamily:'JetBrains Mono'}}>f{i+1}</span><input value={expr} onChange={e=>{const n=[...oE];n[i]=e.target.value;setOE(n)}} onFocus={()=>{setKbT('obj');setKbI(i);setShowKb(true)}} style={{...IS,flex:1}}/></div>))}
+            <button onClick={()=>setOE(o=>[...o,''])} style={{background:'#0e1620',border:'1px solid #1e2d3d',borderRadius:4,color:'#5a7a9a',padding:'3px 8px',fontSize:9,cursor:'pointer',marginTop:2}}>+ obj</button>
+            {oE.length>2&&<button onClick={()=>setOE(o=>o.slice(0,-1))} style={{background:'#0e1620',border:'1px solid #1e2d3d',borderRadius:4,color:'#5a7a9a',padding:'3px 8px',fontSize:9,cursor:'pointer',marginTop:2,marginLeft:4}}>−</button>}
+          </div>
+          <div className="sec"><div className="stit">🚧 Contraintes (g ≤ 0)</div>
+            <div className="tip" style={{marginBottom:4}}>x1+x2 ≤ 8 → écrire "x1+x2-8". x1 ≥ 2 → écrire "2-x1".</div>
+            {cE.length===0&&<div style={{fontSize:9,color:'#14202e',fontStyle:'italic'}}>Aucune contrainte</div>}
+            {cE.map((expr,i)=>(<div key={i} style={{display:'flex',gap:3,marginBottom:2,alignItems:'center'}}><span style={{fontSize:9,color:'#e85d75',width:14,fontFamily:'JetBrains Mono'}}>g{i+1}</span><input value={expr} onChange={e=>{const n=[...cE];n[i]=e.target.value;setCE(n)}} onFocus={()=>{setKbT('con');setKbI(i);setShowKb(true)}} style={{...IS,flex:1}}/><button onClick={()=>setCE(c=>c.filter((_,j)=>j!==i))} style={{background:'none',border:'1px solid #e85d7518',borderRadius:3,color:'#e85d75',padding:'1px 5px',fontSize:9,cursor:'pointer'}}>×</button></div>))}
+            <button onClick={()=>setCE(c=>[...c,''])} style={{background:'#0e1620',border:'1px solid #1e2d3d',borderRadius:4,color:'#5a7a9a',padding:'3px 8px',fontSize:9,cursor:'pointer',marginTop:2}}>+ contr.</button>
+          </div>
+          </>)}
+          {showKb&&<MathKB target={kbT==='obj'?'f'+(kbI+1):'g'+(kbI+1)} onInsert={insKb} onClose={()=>setShowKb(false)}/>}
+        </div>)}
+
+        {tab==='params'&&(<div>
+          <div className="sec"><div className="stit">👥 Population</div><div className="pr"><span className="pl">N_pop</span><input type="range" min={20} max={300} step={10} value={P.nPop} onChange={e=>setP(p=>({...p,nPop:+e.target.value}))}/><span className="pv">{P.nPop}</span></div><div className="tip">Taille de la population. Plus grand = meilleure exploration mais plus lent. 50-100 recommandé.</div></div>
+          <div className="sec"><div className="stit">🧬 Croisement</div><div className="pr"><span className="pl">P_cross</span><input type="range" min={.1} max={1} step={.05} value={P.pCross} onChange={e=>setP(p=>({...p,pCross:+e.target.value}))}/><span className="pv">{P.pCross}</span></div><div className="tip">Probabilité de croisement. 0.9 = quasi systématique.</div><div className="pr" style={{marginTop:4}}><span className="pl">η_croisement</span><input type="range" min={1} max={50} step={1} value={P.etaC} onChange={e=>setP(p=>({...p,etaC:+e.target.value}))}/><span className="pv">{P.etaC}</span></div><div className="tip">Petit (2-5) = exploration. Grand (20+) = exploitation.</div></div>
+          <div className="sec"><div className="stit">⚡ Mutation</div><div className="pr"><span className="pl">η_mutation</span><input type="range" min={1} max={50} step={1} value={P.etaM} onChange={e=>setP(p=>({...p,etaM:+e.target.value}))}/><span className="pv">{P.etaM}</span></div><div className="tip">Petit = grandes perturbations. Grand = petits ajustements.</div></div>
+          <div className="sec"><div className="stit">🔴 G_max</div><div className="pr"><span className="pl">G_max</span><input type="range" min={20} max={1000} step={10} value={P.nGen} onChange={e=>setP(p=>({...p,nGen:+e.target.value}))}/><span className="pv">{P.nGen}</span></div></div>
+          <div className="sec"><div className="stit">🟢 Convergence auto</div><div className="pr"><span className="pl">Fenêtre N</span><input type="range" min={10} max={200} step={5} value={cWin} onChange={e=>setCWin(+e.target.value)}/><span className="pv">{cWin}</span></div><div className="tip">Compare les optimaux sur N gén. Grand = prudent.</div><div className="pr" style={{marginTop:4}}><span className="pl">ε (%)</span><input type="range" min={0.001} max={1} step={0.001} value={cEps*100} onChange={e=>setCEps(+e.target.value/100)}/><span className="pv">{(cEps*100).toFixed(2)}</span></div><div className="tip">Seuil. Petit = exigeant.</div></div>
+        </div>)}
+        </div>
+      </div>
+
+      {/* MAIN */}
+      <div style={{flex:1,overflowY:'auto',padding:'10px 14px'}}>
+        {/* Log */}
+        {log&&(<div style={{background:curS?curS.color+'08':'#0a1018',border:'1px solid '+(curS?curS.color+'18':'#141e2c'),borderRadius:8,padding:'10px 14px',marginBottom:8,borderLeft:'3px solid '+(curS?curS.color:'#141e2c')}}>
+          <div style={{fontSize:10.5,color:'#7a98b0',fontFamily:'JetBrains Mono',lineHeight:1.6}}>{log}</div>
+          {/* Tourney details - shown when si===3 (just did select, about to cross) */}
+          {tourneyLog.length>0&&(si===3||si===4)&&(<div style={{marginTop:8,background:'rgba(0,0,0,.2)',borderRadius:6,padding:8}}>
+            <div style={{fontSize:9,color:'#8b5cf6',fontWeight:600,marginBottom:4}}>Exemples de tournois (5 sur {P.nPop}) :</div>
+            {tourneyLog.map((t,i)=>(<div key={i} style={{fontSize:9,color:'#5a8aaa',fontFamily:'JetBrains Mono'}}>
+              #{i+1}: <span style={{color:t.winner==='A'?'#4ade80':'#5a8aaa'}}>A(rang={t.aRank}, cd={isFinite(t.aCd)?t.aCd.toFixed(1):'∞'})</span> vs <span style={{color:t.winner==='B'?'#4ade80':'#5a8aaa'}}>B(rang={t.bRank}, cd={isFinite(t.bCd)?t.bCd.toFixed(1):'∞'})</span> → <b style={{color:'#4ade80'}}>✓ {t.winner}</b> {t.aRank!==t.bRank?' (meilleur rang)':' (meilleur crowding)'}
+            </div>))}
+          </div>)}
+          {/* Mutation count - shown when si===5 (just did mutate, about to replace) */}
+          {mutCount>0&&si===5&&(<div style={{marginTop:6,fontSize:9,color:'#f59e0b'}}>⚡ {mutCount} enfants ont subi au moins une mutation → affichés en 🔴 rouge sur le graphique.</div>)}
+        </div>)}
+
+        {!pop?(<div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'50vh',gap:12}}>
+          <div style={{fontSize:44}}>🧬</div>
+          <div style={{color:'#2e4a60',fontSize:12,textAlign:'center',maxWidth:380,lineHeight:1.7}}>
+            Lisez la <b style={{color:'#7ecbf5'}}>📖 Théorie</b>, configurez le <b style={{color:'#f5a623'}}>⚙️ Problème</b>, puis cliquez <b style={{color:'#7ecbf5'}}>🎲 Init</b>.
+          </div>
+        </div>):(<>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8}}>
+            <div style={CB}><Chart data={cd} xL="f₁" yL="f₂" title="Espace objectifs" w={400} h={270} colorBy="rank" showLine highlights={hl} extraPoints={extraPts}/></div>
+            <div style={CB}><Chart data={cd} xL="f₁" yL="f₂" title="Admissibilité" w={400} h={270} colorBy="feas"/></div>
+            {dd&&<div style={CB}><Chart data={dd} xL="x₁" yL="x₂" title="Espace de conception" w={400} h={270} colorBy="rank"/></div>}
+            {cs.length>0&&cs[0].data.length>1&&<div style={CB}><LChart series={cs} xL="Génération" yL="min(fₖ)" title="Convergence" w={400} h={270}/></div>}
+          </div>
+          {best.length>0&&(<div className="card">
+            <div style={{fontSize:9,color:'#4a6a8a',textTransform:'uppercase',letterSpacing:1,marginBottom:6,fontWeight:700}}>🏆 Solutions remarquables — c'est au concepteur de choisir</div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              {best.map((b,i)=>(<div key={i} style={{flex:'1 1 160px',background:b.c+'06',border:'1px solid '+b.c+'18',borderRadius:7,padding:'8px 10px'}}>
+                <div style={{display:'flex',alignItems:'center',gap:4,marginBottom:3}}><div style={{width:7,height:7,borderRadius:'50%',background:b.c}}/><span style={{fontSize:10,fontWeight:600,color:b.c}}>{b.l}</span></div>
+                <div style={{fontFamily:'JetBrains Mono',fontSize:9,color:'#5a8aaa',lineHeight:1.5}}>
+                  {b.ind.x.slice(0,6).map((v,j)=><span key={j} style={{marginRight:5}}>x{j+1}={vt[j]==='discrete'?v:v.toFixed(3)}</span>)}{b.ind.x.length>6&&<span style={{color:'#2e4050'}}>... (+{b.ind.x.length-6})</span>}
+                  <div style={{borderTop:'1px solid #141e2c',marginTop:2,paddingTop:2}}>{b.ind.obj.map((v,j)=><span key={j} style={{color:'#f5a623',marginRight:6}}>f{j+1}={isFinite(v)?v.toFixed(4):'?'}</span>)}</div>
+                </div>
+              </div>))}
+            </div>
+          </div>)}
+          <div className="card">
+            <div style={{fontSize:8.5,color:'#3e5a70',textTransform:'uppercase',letterSpacing:1,marginBottom:4,fontWeight:600}}>Front Pareto — Top 20</div>
+            <div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:8.5}}>
+              <thead><tr style={{background:'#0c1220'}}><th style={TH}>#</th>{Array.from({length:Math.min(nVar,6)},(_,i)=><th key={i} style={TH}>x{i+1}</th>)}{Array.from({length:nObjEff},(_,i)=><th key={'f'+i} style={{...TH,color:'#f5a623'}}>f{i+1}</th>)}<th style={{...TH,color:'#4ade80'}}>✓</th><th style={TH}>Cd</th></tr></thead>
+              <tbody>{pop.filter(p=>p.rank===0&&p.feasible&&p.obj.every(isFinite)).sort((a,b)=>a.obj[0]-b.obj[0]).slice(0,20).map((ind,i)=>{const star=best.some(b=>b.ind===ind);return(<tr key={i} style={{background:star?'#7ecbf506':i%2?'#080c14':'#0a1018'}}><td style={{...TD,color:star?'#7ecbf5':'#2e4050'}}>{star?'★':i+1}</td>{ind.x.slice(0,6).map((v,j)=><td key={j} style={TD}>{vt[j]==='discrete'?v:v.toFixed(4)}</td>)}{ind.obj.slice(0,nObjEff).map((v,j)=><td key={'f'+j} style={{...TD,color:'#f5a623'}}>{v.toFixed(4)}</td>)}<td style={{...TD,color:'#4ade80'}}>✓</td><td style={TD}>{isFinite(ind.cd)?ind.cd.toFixed(1):'∞'}</td></tr>)})}</tbody>
+            </table></div>
+          </div>
+        </>)}
+      </div>
+    </div>
+  </div>);
+}
+
+const TH={padding:'4px 6px',textAlign:'left',color:'#3e5a70',borderBottom:'1px solid #141e2c',fontWeight:600,fontFamily:'JetBrains Mono',fontSize:8};
+const TD={padding:'3px 6px',borderBottom:'1px solid #0e1620',color:'#5a8aaa',fontFamily:'JetBrains Mono',fontSize:8};
+ReactDOM.render(<App/>,document.getElementById('root'));
+</script>
+</body>
+</html>
