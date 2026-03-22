@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NSGA-II Lab</title>
+<title>Opti Lab</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
@@ -303,7 +303,7 @@ function App(){
     {/* TOP BAR */}
     <div className="topbar">
       <div style={{display:'flex',alignItems:'center',gap:8,padding:'7px 0',flexWrap:'wrap'}}>
-        <span style={{fontSize:16,fontWeight:800,color:'#7ecbf5',fontFamily:'JetBrains Mono',flexShrink:0}}>NSGA-II</span>
+        <span style={{fontSize:16,fontWeight:800,color:'#7ecbf5',fontFamily:'JetBrains Mono',flexShrink:0}}>OptiLab</span>
         <div style={{display:'flex',gap:4,flexShrink:0}}>
           <button className="btn" onClick={init} style={{background:'#7ecbf512',borderColor:'#7ecbf540',color:'#7ecbf5',padding:'5px 12px'}}>🎲 Init</button>
           <button className="btn" onClick={advance} disabled={!pop||running||si<0} style={{background:'#f5a62312',borderColor:'#f5a62340',color:'#f5a623',padding:'5px 12px'}}>+1 étape</button>
