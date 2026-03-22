@@ -331,12 +331,12 @@ function App(){
       {/* LEFT */}
       <div style={{width:310,minWidth:310,borderRight:'1px solid #141e2c',display:'flex',flexDirection:'column',background:'#090d16'}}>
         <div style={{display:'flex',borderBottom:'1px solid #141e2c'}}>
-          {[{id:'guide',l:'📖 Théorie'},{id:'problem',l:'⚙️ Problème'},{id:'params',l:'🎛 Params'}].map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:'7px',background:tab===t.id?'#0c1220':'transparent',border:'none',borderBottom:tab===t.id?'2px solid #7ecbf5':'2px solid transparent',color:tab===t.id?'#7ecbf5':'#2e4a60',fontSize:9.5,cursor:'pointer',fontFamily:'DM Sans',fontWeight:tab===t.id?600:400}}>{t.l}</button>))}
+          {[{id:'guide',l:'📖 Guide'},{id:'problem',l:'⚙️ Problème'},{id:'params',l:'🎛 Params'}].map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:'7px',background:tab===t.id?'#0c1220':'transparent',border:'none',borderBottom:tab===t.id?'2px solid #7ecbf5':'2px solid transparent',color:tab===t.id?'#7ecbf5':'#2e4a60',fontSize:9.5,cursor:'pointer',fontFamily:'DM Sans',fontWeight:tab===t.id?600:400}}>{t.l}</button>))}
         </div>
         <div style={{flex:1,overflowY:'auto',padding:'10px 12px',fontSize:11,color:'#8098b0',lineHeight:1.65}}>
         {tab==='guide'&&(<div>
-          <div className="sec"><div className="stit">📌 Qu'est-ce que NSGA-II ?</div>
-            <p>NSGA-II (Non-dominated Sorting Genetic Algorithm II) est un <b style={{color:'#7ecbf5'}}>algorithme génétique</b> conçu pour l'<b style={{color:'#f5a623'}}>optimisation multi-objectifs</b>. Contrairement à une optimisation classique qui cherche UN minimum, ici on a <b>plusieurs objectifs contradictoires</b> : améliorer l'un dégrade l'autre.</p>
+          <div className="sec"><div className="stit">📌 Qu'est-ce qu'OptiLab ?</div>
+            <p>OptiLab est un outil en ligne développé par Valentin Angenot dans le cadre du cours de Vincent Kelner. L'objectif est d'implémenter un<b style={{color:'#7ecbf5'}}>algorithme génétique</b> pour l'<b style={{color:'#f5a623'}}>optimisation multi-objectifs sous contraintes</b> de façon interactive et pédagogique. Contrairement à une optimisation classique qui cherche UN minimum, ici on a <b>plusieurs objectifs contradictoires</b> : améliorer l'un peut dégrader l'autre.</p>
             <p style={{marginTop:6}}>L'algorithme ne donne pas UNE solution mais un <b style={{color:'#f5a623'}}>ensemble de compromis</b> appelé <b>front de Pareto</b>.</p>
           </div>
 
@@ -481,7 +481,7 @@ function App(){
         {!pop?(<div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'50vh',gap:12}}>
           <div style={{fontSize:44}}>🧬</div>
           <div style={{color:'#2e4a60',fontSize:12,textAlign:'center',maxWidth:380,lineHeight:1.7}}>
-            Lisez la <b style={{color:'#7ecbf5'}}>📖 Théorie</b>, configurez le <b style={{color:'#f5a623'}}>⚙️ Problème</b>, puis cliquez <b style={{color:'#7ecbf5'}}>🎲 Init</b>.
+            Lisez le <b style={{color:'#7ecbf5'}}>📖 Guide</b>, configurez le <b style={{color:'#f5a623'}}>⚙️ Problème</b>, puis cliquez <b style={{color:'#7ecbf5'}}>🎲 Init</b>.
           </div>
         </div>):(<>
           <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8}}>
